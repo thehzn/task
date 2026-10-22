@@ -1,18 +1,29 @@
-const express  =require("express");
+const express = require("express");
 const { userAuthenticate, userAutherize } = require("../middleware/auth");
-const { createTaskbyUser,createTaskbymanager,getAllforUser,getAllformanager,getTask,updateTaskbyUser,updateTaskbymanager,deleteTask } = require("../controllers/taskControllers");
+const {
+  createTaskbyUser,
+  createTaskbymanager,
+  getAllforUser,
+  getAllformanager,
+  getTask,
+  updateTaskbyUser,
+  updateTaskbymanager,
+  deleteTask,
+} = require("../controllers/taskControllers");
 const router = express.Router();
 
 
-router.route("/create").post(userAuthenticate,createTaskbyUser);
-router.route("/createbymanager").post(userAuthenticate,userAutherize("manager"),createTaskbymanager);
-router.route("/getall").get(userAuthenticate,getAllforUser);
-router.route("/getallformanager").get(userAuthenticate,userAutherize("manager"),getAllformanager);
-router.route("/get/:id").get(userAuthenticate,getTask);
-router.route("/update/:id").put(userAuthenticate,updateTaskbyUser);
-router.route("/updatebymanager/:id").put(userAuthenticate,userAutherize("manager"),updateTaskbymanager);
-router.route("/delete/:id").delete(userAuthenticate,deleteTask);
+router.route("/create").post(userAuthenticate, createTaskbyUser);
+router.route("/getall").get(userAuthenticate, getAllforUser);
+router.route("/update/:id").put(userAuthenticate, updateTaskbyUser);
 
 
+const managerOrAdmin = userAutherize("manager", "admin");
+router.route("/createbymanager").post(userAuthenticate, managerOrAdmin, createTaskbymanager);
+router.route("/getallformanager").get(userAuthenticate, managerOrAdmin, getAllformanager);
+router.route("/updatebymanager/:id").put(userAuthenticate, managerOrAdmin, updateTaskbymanager);
 
-module.exports= router;
+router.route("/get/:id").get(userAuthenticate, getTask);
+router.route("/delete/:id").delete(userAuthenticate, deleteTask);
+
+module.exports = router;

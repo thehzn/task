@@ -1,125 +1,142 @@
 const User = require("../models/userSchema");
 const { generateToken } = require("../utils/token");
+const { getCookieOpts, getClearCookieOpts } = require("../utils/cookie");
 
 
+const safeUser = (u) => ({
+  id: u._id,
+  name: u.name,
+  email: u.email,
+  age: u.age,
+  role: u.role,
+});
 
-exports.userRegister = async(req,res)=>{
 
-    try{
+const tokenInBody = (token) =>
+  process.env.RETURN_TOKEN_IN_BODY === "true" ? { token } : {};
 
-const {name,email,password,age,role}=req.body;
-console.log(req.body);
+exports.userRegister = async (req, res) => {
+  try {
+    const { name, email, password, age, role } = req.body;
 
-if(!name || !email || !password ||!age ){
-    return res.status(400).json({
-        message:"enter full details" ,
-        success:false 
+    if (!name || !email || !password || !age) {
+      return res.status(400).json({ success: false, message: "Enter full details" });
+    }
+    if (typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({ success: false, message: "Invalid details" });
+    }
+    if (password.length < 6) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Email already registered" });
+    }
+
+
+    const safeRole = ["user", "manager"].includes(role) ? role : "user";
+
+    const user = await User.create({
+      name,
+      email: normalizedEmail,
+      password,
+      age,
+      role: safeRole,
     });
-}
-const existinguser = await User.findOne({email});
-if(existinguser){
-     return res.status(400).json({ message: "Email already registered", 
-        success: false });
-}
 
+    const token = await generateToken(user._id, user.role);
 
-  const user=await User.create({ name, email, password,age, role }); 
-    
-  const token =await generateToken(user._id,user.role); 
- 
-         res.status(201).cookie("token", token).json({
-        message:"user registered succussfully" ,
-        success:true,
-        user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        age:user.age,
-        role: user.role,
-        
-      },
-    });
+    return res
+      .status(201)
+      .cookie("token", token, getCookieOpts())
+      .json({
+        success: true,
+        message: "User registered successfully",
+        user: safeUser(user),
+        ...tokenInBody(token),
+      });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: "Email already registered" });
     }
-    catch(error){
-         return res.status(500).json({
-            message: error.message,
-            success:false,
-        });
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map((e) => e.message).join(", "),
+      });
+    }
+    console.error("register error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.userLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password || typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({ success: false, message: "Enter full details" });
     }
 
-
-    
-   
-}
-
-exports.userLogin = async(req,res)=>{
-    try{
-       
-        
-        const {email ,password} =req.body;
+    const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password");
 
 
-        if(!email || !password){
-            return res.status(400).json({
-        message:"enter full details" ,
-        success:false 
-     })}
-
-       const user = await User.findOne({email}).select("+password");
-   
-       
-
-       if(!user){
-         return res.status(404).json({
-        message:"user not found" ,
-        success:false 
-     })}
-
-
-    const isMatch = await user.comparePassword(password);
-
-     if(!isMatch){
-         return res.status(401).json({
-        message:"invalid credentials" ,
-        success:false 
-     })}
-
-
-     const token = await generateToken(user._id,user.role);
-     
-
-
-     
-     res.status(200).cookie('token',token).json({
-       message:"user logged succussfully" ,
-        success:true,
-       user,
-      
-      
-     });
+    if (!user || !(await user.comparePassword(password))) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
     }
-     catch(error){
 
-         return res.status(500).json({
-            message: error.message,
-            success:false,
-        });
-     }
-}
+    const token = await generateToken(user._id, user.role);
 
+    return res
+      .status(200)
+      .cookie("token", token, getCookieOpts())
+      .json({
+        success: true,
+        message: "User logged in successfully",
+        user: safeUser(user),
+        ...tokenInBody(token),
+      });
+  } catch (error) {
+    console.error("login error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
-exports.userLogout =(req,res)=>{
-     res.status(200).clearCookie("token").json({
-        message:"user logged out successfully",
-        success:true,
-    })
-}
+exports.userLogout = (req, res) => {
+  return res
+    .status(200)
+    .clearCookie("token", getClearCookieOpts())
+    .json({ success: true, message: "User logged out successfully" });
+};
 
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.userId).select("-password");
-    res.json({ success: true, user });
-  } catch (err) {
-    res.status(500).json({ message: err.message, success: false });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    return res.json({ success: true, user: safeUser(user) });
+  } catch (error) {
+    console.error("getMe error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+exports.getAssignableUsers = async (req, res) => {
+  try {
+    const roles = req.userRole === "admin" ? ["user", "manager"] : ["user"];
+    const users = await User.find({ role: { $in: roles } })
+      .select("name email role")
+      .sort({ name: 1 })
+      .limit(200);
+    return res.json({ success: true, users });
+  } catch (error) {
+    console.error("getAssignableUsers error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
